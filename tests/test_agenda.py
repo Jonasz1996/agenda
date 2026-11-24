@@ -289,3 +289,22 @@ def test_import_oud():
 
 def test_healthz(client):
     assert client.get("/healthz").json["ok"] is True
+
+
+def test_straat_met_afkorting():
+    seen = []
+
+    def handler(req):
+        if req.url.path.endswith("/access-token"):
+            return httpx.Response(200, json={"accessToken": "acc"})
+        if req.url.path.endswith("/streets"):
+            seen.append(req.url.params["q"])
+            if req.url.params["q"].lower() == "liefferingestraat":
+                return httpx.Response(200, json={"items": [{"id": "x", "name": "Kerkstraat"},
+                                                           {"id": "s9", "name": "Burgemeester Van Liefferingestraat"}]})
+            return httpx.Response(200, json={"items": []})
+        return httpx.Response(404)
+
+    c = Client(httpx.Client(transport=httpx.MockTransport(handler)), secret="s")
+    assert c.street_id("z", "burg. van liefferingestraat") == "s9"
+    assert seen == ["burg. van liefferingestraat", "liefferingestraat"]

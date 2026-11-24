@@ -100,10 +100,19 @@ class Client:
 
     def street_id(self, zipcode_id: str, street: str) -> str:
         items = self.api("/streets", {"q": street, "zipcodes": zipcode_id}).get("items") or []
+        if not items:
+            # "Burg. van Liefferingestraat": afkortingen vindt de zoekfunctie niet; dan op het langste woord.
+            word = max(re.findall(r"[A-Za-zÀ-ÿ]{4,}", street) or [street], key=len)
+            if word != street:
+                items = self.api("/streets", {"q": word, "zipcodes": zipcode_id}).get("items") or []
         want = _norm(street)
         for it in items:
             names = [it.get("name")] + list((it.get("names") or {}).values())
             if any(_norm(n or "") == want for n in names):
+                return it["id"]
+        tail = _norm(max(re.findall(r"[A-Za-zÀ-ÿ]{4,}", street) or [street], key=len))
+        for it in items:
+            if tail and tail in _norm(it.get("name") or ""):
                 return it["id"]
         if items:
             return items[0]["id"]
