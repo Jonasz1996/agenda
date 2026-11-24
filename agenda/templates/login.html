@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ name }} · aanmelden</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="center">
+  <form method="post" class="card">
+    <h1>{{ name }}</h1>
+    {% if can_login %}
+      <label>Wachtwoord <input type="password" name="password" autofocus required autocomplete="current-password"></label>
+      <button class="btn">Aanmelden</button>
+    {% endif %}
+    {% if error %}<p class="err">{{ error }}</p>{% endif %}
+    <p><a href="{{ url_for('index') }}">terug naar de agenda</a></p>
+  </form>
+</body>
+</html>

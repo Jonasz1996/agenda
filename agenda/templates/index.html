@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ name }}</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="{{ url_for('static', filename='fullcalendar-6.1.15.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='fullcalendar-nl-6.1.15.js') }}"></script>
+</head>
+<body data-csrf="{{ csrf }}" data-user="{{ user or '' }}" data-tz="{{ tz }}">
+  <header>
+    <h1>{{ name }}</h1>
+    <div class="right">
+      <a class="btn ghost" href="{{ url_for('feed') }}" title="ICS-feed voor homepage of je gsm">ICS</a>
+      {% if user %}
+        <button class="btn ghost" id="recycle-open" type="button">Afvalkalender</button>
+        {% if not via_proxy %}
+        <form method="post" action="{{ url_for('logout') }}"><button class="btn ghost">Afmelden</button></form>
+        {% endif %}
+      {% elif can_login %}
+        <a class="btn" href="{{ url_for('login') }}">Aanmelden om te wijzigen</a>
+      {% endif %}
+    </div>
+  </header>
+
+  <section id="next" class="next" aria-live="polite"></section>
+  <main><div id="calendar"></div></main>
+  <p class="hint">{% if user %}Klik op een dag om iets toe te voegen, op een afspraak om ze te bewerken. Slepen verplaatst.{% else %}Alleen lezen.{% endif %}</p>
+
+  <dialog id="ev">
+    <form method="dialog" id="ev-form">
+      <h2 id="ev-title">Afspraak</h2>
+      <label>Wat <input name="title" required maxlength="200" list="titles" autocomplete="off"></label>
+      <datalist id="titles">
+        <option value="PMD"><option value="GFT"><option value="Papier en karton"><option value="Glas">
+        <option value="Restafval"><option value="Blauwe zak"><option value="Zwarte zak">
+      </datalist>
+      <label class="chk"><input type="checkbox" name="allDay"> hele dag</label>
+      <div class="row">
+        <label>Begin <input name="start" type="datetime-local" required></label>
+        <label>Einde <input name="end" type="datetime-local"></label>
+      </div>
+      <label>Soort <select name="category">
+        <option value="">gewoon</option><option value="afval">afval</option><option value="werk">werk</option>
+        <option value="privé">privé</option></select></label>
+      <label>Notitie <textarea name="notes" rows="2" maxlength="2000"></textarea></label>
+      <p class="src" id="ev-src"></p>
+      <p class="err" id="ev-err"></p>
+      <div class="actions">
+        <button type="button" class="btn danger" id="ev-del">Verwijderen</button>
+        <span class="grow"></span>
+        <button type="button" class="btn ghost" id="ev-cancel">Annuleren</button>
+        <button type="submit" class="btn" id="ev-save">Bewaren</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="rc">
+    <form method="dialog" id="rc-form">
+      <h2>Afvalkalender (recycleapp.be)</h2>
+      <p class="muted">De ophaaldagen voor je adres komen elke dag automatisch in de agenda, met een herinnering de avond ervoor in de ICS-feed. Je eigen afspraken blijven staan.</p>
+      <div class="row">
+        <label>Postcode <input name="postcode" required maxlength="10" inputmode="numeric"></label>
+        <label>Huisnummer <input name="number" required maxlength="10"></label>
+      </div>
+      <label>Straat <input name="street" required maxlength="80"></label>
+      <p class="muted" id="rc-status"></p>
+      <p class="err" id="rc-err"></p>
+      <div class="actions">
+        <button type="button" class="btn ghost" id="rc-cancel">Sluiten</button>
+        <span class="grow"></span>
+        <button type="button" class="btn ghost" id="rc-sync">Nu ophalen</button>
+        <button type="submit" class="btn">Bewaren en ophalen</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
