@@ -308,3 +308,17 @@ def test_straat_met_afkorting():
     c = Client(httpx.Client(transport=httpx.MockTransport(handler)), secret="s")
     assert c.street_id("z", "burg. van liefferingestraat") == "s9"
     assert seen == ["burg. van liefferingestraat", "liefferingestraat"]
+
+
+def test_import_afval_met_uur_wordt_hele_dag(app):
+    e = convert({"id": 3, "title": "gft", "start": "2026-09-01T10:00:00Z", "end": "2026-09-01T11:00:00Z"}, BXL)
+    assert e["all_day"] and e["start"] == datetime(2026, 9, 1, tzinfo=BXL) and e["end"] == datetime(2026, 9, 2, tzinfo=BXL)
+    from tools.import_old import fix_waste
+    engine = app.config["ENGINE"]
+    db.add_event(engine, title="pmd", start=datetime(2026, 9, 2, 12, tzinfo=BXL), end=datetime(2026, 9, 2, 13, tzinfo=BXL),
+                 external_id="old:4")
+    db.add_event(engine, title="Tandarts", start=datetime(2026, 9, 2, 12, tzinfo=BXL),
+                 end=datetime(2026, 9, 2, 13, tzinfo=BXL), external_id="old:5")
+    assert fix_waste(engine, BXL) == 1 and fix_waste(engine, BXL) == 0
+    pmd = [x for x in db.list_events(engine) if x["title"] == "pmd"][0]
+    assert pmd["all_day"] and pmd["start"] == datetime(2026, 9, 2, tzinfo=BXL)

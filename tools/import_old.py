@@ -2,6 +2,7 @@
 
     python -m tools.import_old http://192.168.105.172:5269/api/events
     python -m tools.import_old oud.json
+    python -m tools.import_old --fix-waste     # eerder overgenomen ophaaldagen met een uur → hele dag
 
 Gebruikt DATABASE_URL zoals de app. Twee keer draaien maakt geen dubbels (external_id = old:<id>). Een afspraak die
 van middernacht tot middernacht loopt (of tot 23:59) wordt een "hele dag"-afspraak.
@@ -39,22 +40,45 @@ def convert(item: dict, tz: ZoneInfo) -> dict:
     ls, le = s.astimezone(tz), e.astimezone(tz)
     midnight = ls.hour == 0 and ls.minute == 0
     ends_day = (le.hour == 0 and le.minute == 0) or (le.hour == 23 and le.minute >= 59)
-    all_day = len(str(item["start"])) == 10 or (midnight and (ends_day or e <= s))
+    title = str(item.get("title") or "(zonder titel)").strip()[:200]
+    from agenda.ics import WASTE_WORDS
+    waste = any(w in title.lower() for w in WASTE_WORDS)
+    # Ophaaldagen stonden in de oude app met een uur (bv. 12:00): dat is een hele dag.
+    all_day = waste or len(str(item["start"])) == 10 or (midnight and (ends_day or e <= s))
     if all_day:
         d0 = ls.date()
-        d1 = le.date() + (timedelta(days=1) if le.hour == 23 else timedelta())
+        d1 = le.date() + (timedelta(days=1) if (le.hour or le.minute) else timedelta())
         if d1 <= d0:
             d1 = d0 + timedelta(days=1)
         s = datetime.combine(d0, datetime.min.time(), tz)
         e = datetime.combine(d1, datetime.min.time(), tz)
-    title = str(item.get("title") or "(zonder titel)").strip()[:200]
-    from agenda.ics import WASTE_WORDS
-    cat = "afval" if any(w in title.lower() for w in WASTE_WORDS) else None
+    cat = "afval" if waste else None
     return {"title": title, "start": s, "end": max(e, s), "all_day": all_day, "category": cat,
             "external_id": f"old:{item['id']}"}
 
 
+def fix_waste(engine, tz: ZoneInfo) -> int:
+    """Al overgenomen ophaaldagen met een uur erbij omzetten naar een hele dag (eenmalig, veilig om te herhalen)."""
+    from agenda.ics import WASTE_WORDS
+    n = 0
+    for e in db.list_events(engine):
+        if e["all_day"] or not (e["external_id"] or "").startswith("old:"):
+            continue
+        if not any(w in e["title"].lower() for w in WASTE_WORDS):
+            continue
+        d0 = e["start"].astimezone(tz).date()
+        s = datetime.combine(d0, datetime.min.time(), tz)
+        db.update_event(engine, e["id"], all_day=True, start=s, end=s + timedelta(days=1), category="afval")
+        n += 1
+    return n
+
+
 def main(argv: list[str]) -> int:
+    if len(argv) == 2 and argv[1] == "--fix-waste":
+        tz = ZoneInfo(os.environ.get("AGENDA_TZ", "Europe/Brussels"))
+        engine = db.make_engine(os.environ.get("DATABASE_URL", "sqlite:///agenda.db"))
+        print(f"{fix_waste(engine, tz)} ophaaldagen omgezet naar een hele dag")
+        return 0
     if len(argv) != 2:
         print(__doc__)
         return 2

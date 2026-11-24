@@ -17,8 +17,13 @@ CONSUMER = "recycleapp.be"
 TIMEOUT = 20.0
 UA = "agenda.jbogaert.be/2.0"
 
-_SCRIPT = re.compile(r'src="(/?(?:static/js/)?main[^"]*\.js)"')
-_SECRET = re.compile(r'''secret\s*:\s*["']([A-Za-z0-9_\-]{20,})["']''')
+_SCRIPTS = re.compile(r'''<script[^>]+src=["']([^"']+\.js)["']''', re.I)
+_TOKEN = r"([A-Za-z0-9_\-+/=]{20,})"
+_SECRETS = [re.compile(p, re.I) for p in (
+    r'''\bsecret["']?\s*[:=]\s*["'`]''' + _TOKEN + r"[\"'`]",
+    r'''["']x-secret["']\s*[:,]\s*["'`]''' + _TOKEN + r"[\"'`]",
+    r'''\b[A-Z_]*SECRET[A-Z_]*["']?\s*[:=]\s*["'`]''' + _TOKEN + r"[\"'`]",
+)]
 
 
 class RecycleError(Exception):
@@ -40,6 +45,7 @@ class Client:
     def __init__(self, http: httpx.Client | None = None, secret: str | None = None):
         self.http = http or httpx.Client(timeout=TIMEOUT, headers={"User-Agent": UA}, follow_redirects=True)
         self.secret = secret
+        self.candidates: list[str] = []
         self.token: str | None = None
 
     def _get(self, url: str, **kw) -> httpx.Response:
@@ -52,27 +58,42 @@ class Client:
         return r
 
     def find_secret(self) -> str:
+        """Het geheim staat in de JavaScript van de site. Eerst main*.js, dan de andere scripts (hoogstens 8)."""
         if self.secret:
             return self.secret
         page = self._get(SITE + "/").text
-        m = _SCRIPT.search(page)
-        if not m:
-            raise RecycleError("Kon het script van recycleapp.be niet vinden (site veranderd?)")
-        src = m.group(1)
-        js = self._get(SITE + (src if src.startswith("/") else "/" + src)).text
-        s = _SECRET.search(js)
-        if not s:
-            raise RecycleError("Geen geheim in het script van recycleapp.be (site veranderd?): zet RECYCLE_SECRET")
-        self.secret = s.group(1)
-        return self.secret
+        srcs = _SCRIPTS.findall(page)
+        if not srcs:
+            raise RecycleError("Kon geen script van recycleapp.be vinden (site veranderd?): zet RECYCLE_SECRET")
+        srcs.sort(key=lambda x: (0 if "main" in x.rsplit("/", 1)[-1] else 1))
+        for src in srcs[:8]:
+            url = src if src.startswith("http") else SITE + (src if src.startswith("/") else "/" + src)
+            if not url.startswith(SITE + "/"):
+                continue
+            js = self._get(url).text
+            for pat in _SECRETS:
+                for m in pat.finditer(js):
+                    if m.group(1) not in self.candidates:
+                        self.candidates.append(m.group(1))
+            if self.candidates:
+                return self.candidates[0]
+        raise RecycleError("Geen geheim in de scripts van recycleapp.be (site veranderd?): zet RECYCLE_SECRET")
 
     def login(self) -> str:
-        r = self._get(API + "/access-token", headers={"x-secret": self.find_secret(), "x-consumer": CONSUMER})
-        token = (r.json() or {}).get("accessToken")
-        if not token:
-            raise RecycleError("Geen toegangstoken van recycleapp.be")
-        self.token = token
-        return token
+        first = self.find_secret()
+        tries = [first] + [c for c in self.candidates if c != first][:5]
+        last = None
+        for secret in tries:
+            try:
+                r = self._get(API + "/access-token", headers={"x-secret": secret, "x-consumer": CONSUMER})
+            except RecycleError as e:  # verkeerde kandidaat: de volgende proberen
+                last = e
+                continue
+            token = (r.json() or {}).get("accessToken")
+            if token:
+                self.secret, self.token = secret, token
+                return token
+        raise last or RecycleError("Geen toegangstoken van recycleapp.be")
 
     def api(self, path: str, params: dict) -> dict:
         if not self.token:
