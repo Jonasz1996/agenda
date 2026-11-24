@@ -190,7 +190,8 @@ def fake_recycle(calls: list):
         if u.path.endswith("/access-token"):
             assert req.headers["x-consumer"] == "recycleapp.be" and req.headers["x-secret"].startswith("FAKEsecret")
             return httpx.Response(200, json={"accessToken": "acc", "expiresAt": "2026-11-25T00:00:00Z"})
-        assert req.headers["authorization"] == "acc"
+        if req.headers.get("authorization") != "acc":
+            return httpx.Response(401, json={"error": "token"})
         if u.path.endswith("/zipcodes"):
             return httpx.Response(200, json={"items": [{"id": "9000-44021", "code": "9000"}]})
         if u.path.endswith("/streets"):
@@ -322,3 +323,32 @@ def test_import_afval_met_uur_wordt_hele_dag(app):
     assert fix_waste(engine, BXL) == 1 and fix_waste(engine, BXL) == 0
     pmd = [x for x in db.list_events(engine) if x["title"] == "pmd"][0]
     assert pmd["all_day"] and pmd["start"] == datetime(2026, 9, 2, tzinfo=BXL)
+
+
+def test_nieuwe_site_publieke_api_uit_globalconfig():
+    """Site van 11/2026: window.globalConfig.API inline in de pagina, client = API + /public/v1, zonder geheim."""
+    seen = []
+
+    def handler(req):
+        u = req.url
+        seen.append(str(u).split("?")[0])
+        if u.host == "www.recycleapp.be" and u.path == "/":
+            return httpx.Response(200, text='<html><script>window.globalConfig={API:"https://api.example.fostplus.be/recycle-public",ENV:"prd"}</script>'
+                                             '<script src="/static/js/main.5e11defc.chunk.js"></script></html>')
+        if u.path.endswith(".js"):
+            return httpx.Response(200, text='baseURL:window.globalConfig.API+"/public/v1",headers:{"x-consumer":"recycleapp.be"}')
+        if u.host != "api.example.fostplus.be" or not u.path.startswith("/recycle-public/public/v1"):
+            return httpx.Response(404)
+        assert req.headers["x-consumer"] == "recycleapp.be" and "authorization" not in req.headers
+        if u.path.endswith("/zipcodes"):
+            return httpx.Response(200, json={"items": [{"id": "9506-1", "code": "9506"}]})
+        if u.path.endswith("/streets"):
+            return httpx.Response(200, json={"items": [{"id": "st", "name": "Kerkstraat"}]})
+        if u.path.endswith("/collections"):
+            return httpx.Response(200, json=API)
+        return httpx.Response(404)
+
+    c = Client(httpx.Client(transport=httpx.MockTransport(handler)))
+    got = c.pickups("9506", "Kerkstraat", "22", date(2026, 11, 24), date(2027, 5, 1))
+    assert [p.fraction for p in got] == ["PMD", "Restafval", "GFT"]
+    assert c.base == "https://api.example.fostplus.be/recycle-public/public/v1" and c.token is None
